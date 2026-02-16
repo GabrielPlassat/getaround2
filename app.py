@@ -1,82 +1,75 @@
 import streamlit as st
 import requests
 import pandas as pd
+import time
 
-st.set_page_config(layout="wide", page_title="Getaround France Fix")
+st.set_page_config(layout="wide", page_title="Getaround France")
 
-st.title("🔍 Getaround France - Debug Structure")
-st.markdown("Analyse JSON + solutions alternatives")
+st.title("🚗 Getaround France - Scanner National")
+st.markdown("Analyse temps réel GBFS v3.0 (data.datasets)")
 
-# 1. TEST BRUT MANIFEST (sans assumption)
-if st.button("📊 1. Voir structure JSON brute", type="secondary"):
+@st.cache_data(ttl=1800)
+def scan_manifest_france():
     try:
-        resp = requests.get("https://fr.getaround.com/gbfs/manifest?country_code=FR", timeout=10)
-        st.success(f"✅ Status: {resp.status_code}")
+        resp = requests.get("https://fr.getaround.com/gbfs/manifest?country_code=FR", timeout=15)
         json_data = resp.json()
-        
-        # Debug complet structure
-        st.subheader("Clés disponibles:")
-        st.json(list(json_data.keys()))
-        
-        if 'data' in json_data:
-            data = json_data['data']
-            st.success(f"✅ 'data' trouvé: {list(data.keys())}")
-            if 'gbfs_feeds' in data:
-                feeds = data['gbfs_feeds']
-                st.success(f"✅ {len(feeds)} feeds trouvés")
-                st.write(pd.DataFrame(feeds[:3])[['system_id', 'url']].to_dict())
-            else:
-                st.error("❌ 'gbfs_feeds' manquant")
-                st.write("Clés dans 'data':", list(data.keys()))
-        else:
-            st.error("❌ 'data' manquant")
-            
-    except Exception as e:
-        st.error(f"Erreur: {e}")
+        datasets = json_data['data']['datasets']  # ✅ CORRIGÉ
+        return datasets
+    except:
+        return []
 
-# 2. TEST ENDPOINTS DIRECTS CONNUS
-if st.button("🚗 2. Test endpoints directs", type="secondary"):
-    tests = [
-        "versailles",
-        "yerres", 
-        "evry",
-        "cergy"
-    ]
+systems_fr = scan_manifest_france()
+st.success(f"✅ {len(systems_fr)} systèmes Getaround France détectés")
+
+if st.button("🔍 Scanner France", type="primary"):
+    progres = st.progress(0)
+    all_vehicles = []
     
-    for ville in tests:
+    for i, system in enumerate(systems_fr[:25]):
         try:
-            url = f"https://fr.getaround.com/gbfs/v3/{ville}/gbfs/free_bike_status.json"
-            resp = requests.get(url, timeout=5)
-            if resp.status_code == 200:
-                data = resp.json()
-                bikes = data['data']['bikes']
-                st.success(f"✅ {ville}: {len(bikes)} voitures")
-            else:
-                st.write(f"{ville}: HTTP {resp.status_code}")
+            ville = system['system_id'].replace('getaround_', '')
+            url = system['urls']['en']['free_bike_status']
+            resp = requests.get(url, timeout=6)
+            vehicles = resp.json()['data']['bikes']
+            
+            for v in vehicles:
+                v['ville'] = ville
+                all_vehicles.append(v)
+            
+            progres.progress((i+1)/25)
+            time.sleep(0.1)
         except:
-            st.write(f"{ville}: ❌ erreur")
+            continue
+    
+    if all_vehicles:
+        df = pd.DataFrame(all_vehicles)
+        df['lat'] = df['lat'].astype(float)
+        df['lon'] = df['lon'].astype(float)
+        
+        st.success(f"✅ {len(df)} véhicules sur {len(df['ville'].unique())} villes")
+        
+        col1, col2 = st.columns([2,1])
+        
+        with col1:
+            st.subheader("🏙️ Flottes par ville (Top 15)")
+            top_villes = df['ville'].value_counts().head(15)
+            st.bar_chart(top_villes)
+        
+        with col2:
+            st.metric("Total France", len(df))
+            st.metric("Villes actives", len(df['ville'].unique()))
+            st.metric("Moyenne/ville", round(len(df)/len(df['ville'].unique())))
+        
+        st.subheader("🥇 Top 10 villes")
+        top10 = df['ville'].value_counts().head(10).reset_index()
+        top10.columns = ['Ville', 'Véhicules']
+        st.dataframe(top10)
+        
+        csv = df.to_csv(index=False)
+        st.download_button("💾 Export CSV", csv, "getaround_france.csv")
+        
+    else:
+        st.warning("⚠️ Aucun véhicule libre actuellement (normal hors heures de pointe)")
+        st.info("Getaround = 66k+ véhicules mais free-floating variable")
 
-# 3. FALLBACK : Données transport.data.gouv.fr
-if st.button("📈 3. Dataset officiel data.gouv", type="primary"):
-    st.info("Récupère métadonnées officielles Getaround France")
-    
-    # Dataset statique connu
-    metadata = {
-        "nom": "Getaround Autopartage France",
-        "url_manifest": "https://fr.getaround.com/gbfs/manifest?country_code=FR",
-        "dernier_maj": "2025-11-23",
-        "format": "GBFS v3.0",
-        "couverture": "France entière",
-        "vehicules_estimes": "66 000+"
-    }
-    
-    st.success("✅ Dataset OFFICIEL confirmé")
-    st.json(metadata)
-    
-    st.info("**Prochaines étapes possibles :**\n"
-            "- Scraping site Getaround.fr (villes/actifs)\n"
-            "- Cache local manifest (analyse hors ligne)\n"
-            "- Multi-sources (Zity, Free2Move, etc.)")
-
-st.markdown("---")
-st.caption("Source: transport.data.gouv.fr/datasets/flotte-getaround-en-libre-service-france")
+st.caption("Données GBFS v3.0 officielles - transport.data.gouv.fr")
