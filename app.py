@@ -2,17 +2,17 @@ import streamlit as st
 import requests
 import pandas as pd
 import plotly.express as px
+import numpy as np
 
 st.set_page_config(layout="wide", page_title="Getaround 06")
 
 st.title("🚗 Getaround Alpes-Maritimes - Mouans-Sartoux")
-st.markdown("Dashboard centré 43.66°N, 6.94°E (06)")
+st.markdown("Dashboard centré 43.66°N, 6.94°E")
 
-# Mouans-Sartoux + villes 06 proches
-villes_06 = ["mouans-sartoux", "cannes", "antibes", "grasse", "nice"]
+# Mouans-Sartoux + villes 06
+villes_06 = ["cannes", "antibes", "grasse", "nice"]
 ville = st.selectbox("Ville 06 :", villes_06, index=0)
 
-# Coordonnées Mouans-Sartoux pour centrage
 MOAINS_LAT, MOAINS_LON = 43.66, 6.94
 
 if st.button("🔄 Actualiser", type="primary"):
@@ -25,6 +25,9 @@ if st.button("🔄 Actualiser", type="primary"):
             df = pd.DataFrame(data)
             df['lat'] = df['lat'].astype(float)
             df['lon'] = df['lon'].astype(float)
+            
+            # Distance Mouans-Sartoux (corrigé)
+            dist_km = np.sqrt(((df['lat'] - MOAINS_LAT)**2 + (df['lon'] - MOAINS_LON)**2) * 111**2).mean()
             
             st.success(f"✅ {len(df)} véhicules {ville.title()}")
             
@@ -39,15 +42,15 @@ if st.button("🔄 Actualiser", type="primary"):
             fig.update_layout(title=f"🗺️ {ville.title()} - Voitures libres")
             st.plotly_chart(fig, use_container_width=True)
             
-            # Stats localisation
+            # Stats
             col1, col2, col3, col4 = st.columns(4)
             with col1: st.metric("Total", len(df))
-            with col2: st.metric("Distance centre", f"{((df[['lat','lon']].sub([MOAINS_LAT,MOAINS_LON]).pow(2).sum(1).sqrt()*111).mean():.1f}km")
-            with col3: st.metric("Lat min-max", f"{df.lat.min():.3f}-{df.lat.max():.3f}")
-            with col4: st.metric("Lon min-max", f"{df.lon.min():.3f}-{df.lon.max():.3f}")
+            with col2: st.metric("Dist. centre", f"{dist_km:.1f}km")
+            with col3: st.metric("Lat", f"{df.lat.mean():.3f}°")
+            with col4: st.metric("Lon", f"{df.lon.mean():.3f}°")
             
             st.dataframe(df[['lat','lon','bike_id']].head(10), use_container_width=True)
             
         except Exception as e:
             st.error(f"❌ {ville} indisponible")
-            st.info("Getaround Alpes-Maritimes actif mais GBFS peut être limité.\nTeste 'cannes' ou 'antibes'")
+            st.info("Teste Cannes/Antibes (06 actifs)")
