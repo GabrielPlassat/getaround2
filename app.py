@@ -1,78 +1,72 @@
 import streamlit as st
 import requests
 import pandas as pd
-import time
 
-st.set_page_config(layout="wide", page_title="Getaround France")
+st.set_page_config(layout="wide", page_title="Getaround France Debug")
 
-st.title("Getaround France - Scanner National")
-st.markdown("Analyse temps reel de tous les systemes GBFS")
+st.title("Getaround France - Diagnostic Complet")
+st.markdown("Analyse manifest + endpoints + solutions")
 
-@st.cache_data(ttl=1800)
-def scan_manifest_france():
+# 1. TEST MANIFEST
+if st.button("1. Test Manifest FR", type="secondary"):
     try:
-        resp = requests.get("https://fr.getaround.com/gbfs/manifest?country_code=FR", timeout=15)
+        resp = requests.get("https://fr.getaround.com/gbfs/manifest?country_code=FR", timeout=10)
         data = resp.json()['data']['gbfs_feeds']
-        return data
-    except:
-        return []
-
-systems_fr = scan_manifest_france()
-st.info(f"{len(systems_fr)} systemes Getaround France detectes")
-
-if st.button("Scanner France", type="primary"):
-    progres = st.progress(0)
-    all_vehicles = []
-    
-    for i, system in enumerate(systems_fr[:25]):
-        try:
-            ville = system['system_id'].replace('getaround_', '')
-            url = system['urls']['en']['free_bike_status']
-            resp = requests.get(url, timeout=6)
-            vehicles = resp.json()['data']['bikes']
-            
-            for v in vehicles:
-                v['ville'] = ville
-                all_vehicles.append(v)
-            
-            progres.progress((i+1)/25)
-            time.sleep(0.1)
-        except:
-            continue
-    
-    if all_vehicles:
-        df = pd.DataFrame(all_vehicles)
-        df['lat'] = df['lat'].astype(float)
-        df['lon'] = df['lon'].astype(float)
+        st.success(f"✅ Manifest OK: {len(data)} systèmes")
         
-        st.success(f"{len(df)} vehicules sur {len(df['ville'].unique())} villes")
-        
-        col1, col2 = st.columns([2,1])
-        
-        with col1:
-            st.subheader("Flottes par ville")
-            top_villes = df['ville'].value_counts().head(15)
-            st.bar_chart(top_villes)
-        
-        with col2:
-            total = len(df)
-            villes_actives = len(df['ville'].unique())
-            st.metric("Total France", total)
-            st.metric("Villes actives", villes_actives)
-            st.metric("Moyenne/ville", total//villes_actives)
-        
-        st.subheader("Top 10 villes")
-        top10 = (df['ville'].value_counts()
-                .head(10)
-                .reset_index())
-        top10.columns = ['Ville', 'Vehicules']
+        # Top 10 systèmes
+        top10 = pd.DataFrame(data[:10])[['system_id', 'url']]
         st.dataframe(top10)
+        st.json({"total_systems": len(data)})
         
-        csv = df.to_csv(index=False)
-        st.download_button("Export CSV", csv, "getaround_france.csv")
-        
-    else:
-        st.warning("Aucun vehicule actif")
-        st.info("Flotte variable selon heure/jour")
+    except Exception as e:
+        st.error(f"❌ Manifest erreur: {e}")
 
-st.markdown("Donnees GBFS officielles Getaround France")
+# 2. TEST VILLES CONNUES
+villes_test = ["versailles", "yerres", "paris"]
+if st.button("2. Test 3 villes connues", type="secondary"):
+    for ville in villes_test:
+        try:
+            url = f"https://fr.getaround.com/gbfs/v3/{ville}/gbfs/free_bike_status.json"
+            resp = requests.get(url, timeout=5)
+            count = len(resp.json()['data']['bikes'])
+            st.write(f"**{ville}**: {count} voitures")
+        except:
+            st.write(f"**{ville}**: ❌ indisponible")
+
+# 3. SOLUTION : Manifest + system_info.json (stations)
+if st.button("3. Scanner Stations France", type="primary"):
+    st.info("🔄 Récupère les STATIONS Getaround (pas les voitures live)")
+    
+    try:
+        resp = requests.get("https://fr.getaround.com/gbfs/manifest?country_code=FR")
+        systems = resp.json()['data']['gbfs_feeds'][:15]
+        
+        stations = []
+        for system in systems:
+            try:
+                ville = system['system_id'].replace('getaround_', '')
+                station_url = system['urls']['en']['station_information']
+                resp2 = requests.get(station_url)
+                stat_data = resp2.json()['data']['stations']
+                for s in stat_data:
+                    s['ville'] = ville
+                    stations.append(s)
+            except:
+                continue
+        
+        if stations:
+            df_stations = pd.DataFrame(stations)
+            st.success(f"✅ {len(df_stations)} STATIONS sur {len(df_stations['ville'].unique())} villes")
+            st.dataframe(df_stations[['ville', 'name', 'lat', 'lon']].head(20))
+            st.download_button("Export Stations", df_stations.to_csv(index=False), "getaround_stations.csv")
+        else:
+            st.warning("Aucune station trouvée")
+            
+    except Exception as e:
+        st.error(f"Erreur scan: {e}")
+
+st.markdown("---")
+st.info("**Explication**: GBFS = voitures DISPONIBLES MAINTENANT seulement. Getaround = 60k+ véhicules mais pas tous free-floating 24/7")
+st.caption("Dataset officiel: transport.data.gouv.fr/datasets/flotte-getaround-en-libre-service-france")
+
