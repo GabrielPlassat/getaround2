@@ -57,5 +57,11 @@ if not df_resources.empty:
                 st.download_button(
                     label=f"💾 {resource['format'].upper()}",
                     data=content,
-                    file_nam
+                    file_name=f"getaround_{resource['title'][:20]}.{resource['format']}",
+                    mime=resource.get('mime', None)
+                )
+            except:
+                st.error("Download échoué")
 
+st.markdown("---")
+st.caption("Source officielle transport.data.gouv.fr API")
